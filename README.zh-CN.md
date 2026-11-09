@@ -252,3 +252,12 @@ sudo systemctl restart xsb-bt-stream@left xsb-bt-stream@right
 ## 致谢与许可证
 
 GPL-3.0，见 `LICENSE`。基于 [shairport-sync](https://github.com/mikebrady/shairport-sync)、[NQPTP](https://github.com/mikebrady/nqptp)、[BlueALSA](https://github.com/arkq/bluez-alsa) 和 [fdk-aac](https://github.com/mstorsjo/fdk-aac)。USB gadget 脚本改编自 [batubozkan/pods-head-tracker](https://github.com/batubozkan/pods-head-tracker)（GPL-3.0）。`dkms/xsb-uac2` 在编译时修改内核的 `f_uac2.c`（GPL-2.0），仓库中不包含内核源码。
+
+
+## 实验性 AirPlay 2 Realtime 发送路径
+
+新增独立、可切换的 USB → AirPlay 2 Realtime Wi-Fi 立体声方案；原蓝牙方案不变。
+使用现有 USB Gadget 和 `alsaloop -S 1` 时钟补偿，新增有界 PCM 队列和
+`cliairplay` 实时发送端。**300 ms 是发送端请求的队列深度，并非已实测的声学端到端延迟。**
+需要兼容 CPU/系统架构的 `cliairplay`，并验证小米原生立体声组支持 Realtime type 96。
+安装、切换与测试详见 [ap2-realtime/README.md](ap2-realtime/README.md)。

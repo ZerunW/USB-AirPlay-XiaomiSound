@@ -15,6 +15,8 @@
 set -uo pipefail
 
 LATENCY_MS="${AUDIO_LATENCY_MS:-50}"
+# Legacy remains 1-second polling; experimental realtime unit requests 0.1s.
+POLL_S="${USB_FORWARD_POLL_S:-1}"
 CARD=UAC2Gadget
 
 capture_rate() {
@@ -38,7 +40,7 @@ done
 while :; do
     r=$(capture_rate)
     [ -n "$r" ] && [ "$r" != 0 ] && break
-    sleep 1
+    sleep "$POLL_S"
 done
 echo "host started streaming at ${r} Hz"
 
@@ -56,10 +58,16 @@ echo "host started streaming at ${r} Hz"
     for p in $(pgrep -f "alsaloop -C hw:CARD=$CARD"); do
         if [ "$prio" -gt 0 ]; then chrt -a -f -p "$prio" "$p"; else chrt -a -o -p 0 "$p"; fi 2>/dev/null
     done
-    while sleep 1; do
+    # Require 3 seconds of inactive USB independent of poll interval.
+    zero_since=0
+    while sleep "$POLL_S"; do
         r=$(capture_rate)
-        if [ -z "$r" ] || [ "$r" = 0 ]; then zero=$((zero + 1)); else zero=0; fi
-        if [ "$zero" -ge 3 ]; then
+        if [ -z "$r" ] || [ "$r" = 0 ]; then
+            if [ "$zero_since" = 0 ]; then zero_since=$(date +%s); fi
+        else
+            zero_since=0
+        fi
+        if [ "$zero_since" != 0 ] && [ $(($(date +%s) - zero_since)) -ge 3 ]; then
             echo "host stopped streaming"
             pkill -f "alsaloop -C hw:CARD=$CARD" 2>/dev/null
             exit 0

@@ -22,7 +22,11 @@ airplay)
     done
     ;;
 usb)
-    systemctl --no-block start xsb-usb-forward.service
+    # shairport's ExecStopPost may run during AP2 mode transition. Do not
+    # asynchronously resurrect the legacy forwarder against its AP2 replacement.
+    if [ ! -e /run/xsb-ap2-mode-active ]; then
+        systemctl --no-block start xsb-usb-forward.service
+    fi
     ;;
 *)
     echo "usage: $0 airplay|usb" >&2

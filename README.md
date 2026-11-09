@@ -252,3 +252,14 @@ Restart the streams after a change; restart `bluealsa` after changing `BLUEALSA_
 ## Credits and license
 
 GPL-3.0, see `LICENSE`. Built on [shairport-sync](https://github.com/mikebrady/shairport-sync), [NQPTP](https://github.com/mikebrady/nqptp), [BlueALSA](https://github.com/arkq/bluez-alsa) and [fdk-aac](https://github.com/mstorsjo/fdk-aac). The USB gadget scripts are adapted from [batubozkan/pods-head-tracker](https://github.com/batubozkan/pods-head-tracker) (GPL-3.0). `dkms/xsb-uac2` patches the kernel's `f_uac2.c` (GPL-2.0) at build time; no kernel source is included.
+
+
+## Experimental native AirPlay 2 Realtime (USB → Wi-Fi stereo)
+
+A separate, opt-in prototype (keeps the existing Bluetooth audio path intact)
+is available in [ap2-realtime/README.md](ap2-realtime/README.md). It uses the
+existing USB gadget/clock-feedback forwarding, a bounded realtime PCM bridge,
+and an external `cliairplay` native AirPlay 2 Realtime sender. **300 ms is a
+sender queue setting, not a measured end-to-end latency.** It requires a
+compatible native AirPlay 2 sender binary and confirmation that the Xiaomi
+Wi-Fi stereo group accepts type 96.

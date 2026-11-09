@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Explicit, reversible changeover between Bluetooth and AP2 Realtime.
+# This script never enables a service on boot and keeps the USB clock-feedback
+# forwarder (alsaloop -S 1) running via a dedicated low-latency service.
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -euo pipefail
+MODE="${1:-}"
+STATE=/run/xsb-ap2-mode-previous-services
+AP2=xsb-ap2-realtime.service
+GUARD=/run/xsb-ap2-mode-active
+FORWARD=xsb-ap2-usb-forward.service
+# Ordered by dependencies when restoring. Only previously active units restart.
+SERVICES=(
+  xsb-usb-forward.service
+  xsb-rescue.service
+  bluetooth.service
+  bluealsa.service
+  nqptp.service
+  shairport-sync.service
+  xsb-bt-reconnect.service
+  xsb-bt-stream@left.service
+  xsb-bt-stream@right.service
+  xsb-bt-sniff.service
+  xsb-volume-sync.service
+  xsb-bt-watchdog.service
+)
+if [[ $EUID -ne 0 ]]; then echo 'Run as root (sudo).' >&2; exit 1; fi
+
+restore() {
+  rm -f "$GUARD"
+  systemctl stop "$AP2" || true
+  systemctl stop "$FORWARD" || true
+  if [[ ! -f "$STATE" ]]; then
+    echo "No saved previous service state; stopped $AP2 only." >&2
+    return
+  fi
+  mapfile -t previously < "$STATE"
+  # User may have enabled disabled units manually during experiment; restore
+  # only what was actually active, never turn on a previously stopped unit.
+  for unit in "${previously[@]}"; do
+    [[ -z $unit ]] && continue
+    systemctl start "$unit" || echo "Could not restore $unit" >&2
+  done
+  rm -f "$STATE"
+  echo 'Restored previous audio services.'
+}
+
+case "$MODE" in
+  start)
+    if [[ -f $STATE ]]; then
+      echo 'AP2 mode already has a saved state. Use status or stop.' >&2
+      exit 1
+    fi
+    if [[ ! -r /etc/xsb/ap2-realtime.conf ]]; then
+      echo 'Install/edit /etc/xsb/ap2-realtime.conf first.' >&2; exit 1
+    fi
+    # Avoid eval/source of root-owned configuration in this root controller.
+    grep -qE '^AP2_HOST=[^#[:space:]]+' /etc/xsb/ap2-realtime.conf || {
+      echo 'Missing AP2_HOST' >&2; exit 1;
+    }
+    grep -qE '^AP2_HOST=CHANGE_ME' /etc/xsb/ap2-realtime.conf && {
+      echo 'Set AP2_HOST in /etc/xsb/ap2-realtime.conf first.' >&2; exit 1;
+    }
+    if ! systemctl cat "$AP2" >/dev/null 2>&1; then
+      echo "Missing $AP2; run setup/install-ap2-realtime.sh" >&2; exit 1
+    fi
+    touch "$STATE" "$GUARD"
+    chmod 0600 "$STATE" "$GUARD"
+    for unit in "${SERVICES[@]}"; do
+      if systemctl is-active --quiet "$unit"; then
+        echo "$unit" >> "$STATE"
+      fi
+    done
+    # Stopping shairport-sync can call ExecStopPost to restart USB forwarder.
+    # Stop all old consumers and BLE reconnection before starting Wi-Fi audio.
+    for ((i=${#SERVICES[@]}-1; i>=0; i--)); do
+      systemctl stop "${SERVICES[i]}" || true
+    done
+    if ! systemctl start "$FORWARD" "$AP2"; then
+      echo 'Could not start realtime mode, restoring original services.' >&2
+      restore
+      exit 1
+    fi
+    # Type=simple means systemctl returns before AirPlay authentication/clock lock.
+    # A marker is created only after START is acknowledged by cliairplay.
+    ready=/run/xsb-ap2/ready.json
+    success=0
+    for _ in $(seq 1 300); do
+      if [[ -s $ready ]] && systemctl is-active --quiet "$AP2"; then
+        success=1; break
+      fi
+      sleep 0.1
+    done
+    if [[ $success -ne 1 ]]; then
+      echo 'AirPlay 2 did not reach sender START acknowledgement; restoring audio.' >&2
+      restore
+      exit 1
+    fi
+    echo 'AirPlay 2 sender START acknowledged; measure Xiaomi acoustic latency separately.'
+    echo 'Follow: journalctl -fu xsb-ap2-realtime'
+    ;;
+  stop) restore ;;
+  status)
+    systemctl --no-pager --full status "$AP2" || true
+    if [[ -f $STATE ]]; then
+      echo 'Bluetooth mode saved; run: sudo xsb-ap2-mode stop'
+    else
+      echo 'No saved mode switch.'
+    fi
+    ;;
+  *) echo 'Usage: sudo xsb-ap2-mode start|stop|status' >&2; exit 2 ;;
+esac

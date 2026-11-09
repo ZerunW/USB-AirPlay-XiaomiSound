@@ -1,0 +1,19 @@
+# Fast-polling USB clock-feedback forwarder, only for AP2 experimental mode.
+[Unit]
+Description=Xiaomi Sound Bridge: fast USB -> Loopback (AirPlay 2 experiment)
+After=xsb-gadget.service systemd-modules-load.service
+Requires=xsb-gadget.service
+Conflicts=xsb-usb-forward.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/xsb/xsb.conf
+Environment=USB_FORWARD_POLL_S=0.1
+# Experimental low-latency target; increase to 30/50ms if ALSA underruns.
+Environment=AUDIO_LATENCY_MS=20
+ExecStart=/usr/local/sbin/xsb-usb-forward.sh
+Restart=always
+RestartSec=1
+
+# Deliberately never enabled at boot.

@@ -1,0 +1,22 @@
+# Standalone AirPlay 2 Realtime USB bridge experiment.
+# This is NOT a 300 ms guarantee; validate actual render delay acoustically.
+# Restore the Xiaomi speakers to a Mi Home Wi-Fi stereo group before use.
+AP2_HOST=CHANGE_ME_IP
+AP2_PORT=7000
+AP2_BINARY=/usr/local/bin/cliairplay
+# Queue depth requested at sender, NOT guaranteed end-to-end latency.
+AP2_LATENCY_MS=300
+AP2_TIMING=ptp
+AP2_PERIOD_MS=10
+AP2_CAPTURE_BUFFER_MS=60
+AP2_CAPTURE_POLL_MS=100
+AP2_CAPTURE_DEVICE=hw:CARD=Loopback,DEV=1
+AP2_VOLUME=65
+AP2_CLOCK_WAIT_S=12
+AP2_MAX_EFFECTIVE_QUEUE_MS=500
+AP2_WRITE_TIMEOUT_MS=8
+AP2_START_WAIT_S=6
+# Optional: specify sender interface IP; leave empty for normal routing.
+AP2_BIND_IP=
+# Optional native HAP credentials: secret, keep this configuration private.
+AP2_AUTH=

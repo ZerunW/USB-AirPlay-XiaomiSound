@@ -1,0 +1,34 @@
+[Unit]
+Description=Xiaomi Sound Bridge: USB to native AirPlay 2 Realtime (experimental)
+Documentation=https://github.com/ZerunW/USB-AirPlay-XiaomiSound
+After=network-online.target xsb-gadget.service xsb-ap2-usb-forward.service
+Wants=network-online.target
+Requires=xsb-gadget.service xsb-ap2-usb-forward.service
+Conflicts=nqptp.service shairport-sync.service xsb-bt-stream@left.service xsb-bt-stream@right.service
+StartLimitIntervalSec=90
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=xsb-ap2
+Group=xsb-ap2
+SupplementaryGroups=audio
+EnvironmentFile=/etc/xsb/ap2-realtime.conf
+Environment=PYTHONUNBUFFERED=1
+Environment=AP2_RUNTIME_DIR=/run/xsb-ap2
+ExecStart=/usr/local/bin/xsb-ap2-realtime
+Restart=on-failure
+RestartSec=4
+RuntimeDirectory=xsb-ap2
+RuntimeDirectoryMode=0700
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=no
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+# Intentionally not enabled on boot. Activate using xsb-ap2-mode start.
