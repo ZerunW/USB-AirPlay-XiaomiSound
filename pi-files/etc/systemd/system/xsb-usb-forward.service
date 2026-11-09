@@ -1,0 +1,17 @@
+# Adapted from pods-usb-audio.service (pods-head-tracker, GPL-3.0).
+[Unit]
+Description=Xiaomi Sound Bridge: USB audio -> Loopback forwarder
+After=xsb-gadget.service systemd-modules-load.service
+Wants=xsb-gadget.service
+# Never give up restarting: "host not playing" and "speaker off" are normal.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/xsb/xsb.conf
+ExecStart=/usr/local/sbin/xsb-usb-forward.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

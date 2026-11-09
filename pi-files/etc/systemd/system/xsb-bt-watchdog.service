@@ -1,0 +1,13 @@
+[Unit]
+Description=Xiaomi Sound Bridge: reboot when the Bluetooth controller wedges
+After=bluetooth.service systemd-journald.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/xsb/xsb.conf
+ExecStart=/usr/local/sbin/xsb-bt-watchdog.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

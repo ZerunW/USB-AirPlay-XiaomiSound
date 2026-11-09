@@ -1,0 +1,3 @@
+# Xiaomi Sound Bridge: let shairport-sync session hooks switch the audio source.
+# Only these two exact commands are allowed.
+shairport-sync ALL=(root) NOPASSWD: /usr/local/sbin/xsb-source-switch.sh airplay, /usr/local/sbin/xsb-source-switch.sh usb

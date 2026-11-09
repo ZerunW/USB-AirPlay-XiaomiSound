@@ -1,0 +1,13 @@
+# USB rescue link (only exists while xsb-rescue.sh has enabled the NCM gadget).
+# Link-local addresses on both ends; no DHCP server, no routing.
+[connection]
+id=xsb-usb-rescue
+type=ethernet
+interface-name=usb0
+autoconnect=true
+
+[ipv4]
+method=link-local
+
+[ipv6]
+method=link-local

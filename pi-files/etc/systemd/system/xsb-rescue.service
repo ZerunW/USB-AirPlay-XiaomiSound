@@ -1,0 +1,14 @@
+[Unit]
+Description=Xiaomi Sound Bridge: Wi-Fi watchdog and USB network rescue
+After=xsb-gadget.service NetworkManager.service
+Wants=xsb-gadget.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/xsb/xsb.conf
+ExecStart=/usr/local/sbin/xsb-rescue.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+# Adapted from pods-usb-gadget.service (pods-head-tracker, GPL-3.0).
+[Unit]
+Description=Xiaomi Sound Bridge: UAC2 USB audio gadget
+After=sys-kernel-config.mount
+
+[Service]
+# oneshot + RemainAfterExit: the gadget is kernel state, not a process.
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/xsb-gadget.sh start
+ExecStop=/usr/local/sbin/xsb-gadget.sh stop
+
+[Install]
+WantedBy=multi-user.target

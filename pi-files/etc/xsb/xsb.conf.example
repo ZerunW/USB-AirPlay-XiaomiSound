@@ -1,0 +1,89 @@
+# Xiaomi Sound Bridge configuration.
+# Install as /etc/xsb/xsb.conf and fill in your own values.
+# The real xsb.conf is device-specific (it holds your speakers' MAC addresses):
+# never commit it. Restart the affected service after changing a value; see the
+# README for which service each value affects.
+
+# ---- Speakers ---------------------------------------------------------------
+# Left and right speakers, each on its own Bluetooth A2DP link. Each link
+# carries one channel (--a2dp-force-mono). Get the MACs with
+# "bluetoothctl devices" after pairing (see README, "Pair the speakers").
+LEFT_MAC=XX:XX:XX:XX:XX:XX
+RIGHT_MAC=XX:XX:XX:XX:XX:XX
+
+# BlueALSA daemon options (bluealsa.service):
+#   -c AAC                  use AAC (needs the AAC build of BlueALSA)
+#   --aac-bitrate=112000    mono AAC at 112 kbit/s per link
+#   --sbc-quality=low       SBC settings, used only if the link falls back to SBC
+#   --a2dp-force-mono       one channel per link
+#   --a2dp-volume           use each speaker's own AVRCP absolute volume
+#   --initial-volume=50     placeholder level until a speaker reports its own
+#   --keep-alive=5          keep the A2DP stream up 5 s between client reopens
+# Radio time is shared with Wi-Fi on the Zero 2 W. Two "high" SBC streams
+# (bitpool 29 each) were measured to make Wi-Fi unable to authenticate and to
+# stall the Bluetooth controller.
+BLUEALSA_OPTS="-c AAC --aac-bitrate=112000 --sbc-quality=low --a2dp-force-mono --a2dp-volume --initial-volume=50 --keep-alive=5"
+
+# Latency. Each speaker buffers on its own, so the two can land apart. The
+# values below were calibrated on the reference setup of this project (left/right
+# within 10-30 ms). Calibrate your own: play a test signal that is only on one
+# channel and measure the arrival time at each speaker (see README, "Calibrate").
+#
+# Buffer of each Loopback -> Bluetooth stream, in milliseconds. This is part of
+# the Pi's added delay (about 150 ms in total with the values below).
+BT_LATENCY_MS=100
+# Per-speaker overrides of BT_LATENCY_MS. Raise the value of the speaker that
+# plays earlier to line the two up.
+LEFT_LATENCY_MS=80
+RIGHT_LATENCY_MS=100
+
+# alsaloop latency for USB -> Loopback forwarding, in milliseconds.
+AUDIO_LATENCY_MS=50
+
+# Speakers receive a stream only while a source plays. The stream stops after
+# this many idle seconds, which frees the shared 2.4 GHz radio for Wi-Fi.
+# 0 = stream all the time (silence while idle).
+BT_IDLE_STOP_S=15
+
+# Idle Bluetooth links enter sniff mode after this many milliseconds
+# (xsb-bt-sniff.service), freeing the shared radio for Wi-Fi. 0 = never.
+# The stream wakes a sniffing link before it sends audio, so the start is not
+# delayed by sniff mode.
+BT_IDLE_SNIFF_MS=2000
+
+# ---------------------------------------------------------------------------
+# Other settings
+# ---------------------------------------------------------------------------
+
+# Real-time priority of the USB forwarder (alsaloop); 0 = normal scheduling.
+# Must stay below the Bluetooth streams (40) and bluealsa (50).
+USB_FORWARD_RTPRIO=0
+
+# At boot the Bluetooth streams wait up to this many seconds for Wi-Fi to
+# connect first (they starve Wi-Fi authentication on the shared radio).
+WIFI_WAIT_S=90
+
+# Leave empty to keep the speaker's own volume untouched.
+# Set 0-127 to force the speaker's AVRCP absolute volume when forwarding starts.
+AUDIO_VOLUME=
+
+# USB gadget descriptor knobs.
+# After changing SRATE/SYNC, also bump USB_PRODUCT_ID so Windows re-enumerates.
+USB_SRATE=48000
+USB_SYNC=async
+USB_PRODUCT_ID=0x0104
+
+# Wi-Fi watchdog (xsb-rescue.service): re-activate the Wi-Fi connection after
+# it has been down this many seconds (then every 60 -> 120 -> 300 s).
+RETRY_AFTER_S=60
+# USB network rescue: after Wi-Fi has been down this many seconds, the gadget
+# also becomes a USB network card with its own product ID.
+RESCUE_AFTER_S=180
+USB_RESCUE_PRODUCT_ID=0x0105
+
+# Bluetooth stall watchdog (xsb-bt-watchdog.service): reboot after this many
+# controller-stall kernel messages within STALL_WINDOW_S seconds, at most
+# MAX_REBOOTS_PER_HOUR times per hour.
+STALL_EVENTS=3
+STALL_WINDOW_S=30
+MAX_REBOOTS_PER_HOUR=3

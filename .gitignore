@@ -1,0 +1,19 @@
+# Never commit device-specific or secret files
+pi-files/etc/xsb/xsb.conf
+*.local
+secrets/
+network-config
+user-data
+**/system-connections/*
+!**/system-connections/xsb-usb-rescue.nmconnection
+**/var/lib/bluetooth/
+*.pem
+*.key
+.DS_Store
+
+# Python bytecode and editor / OS leftovers
+__pycache__/
+*.pyc
+*~
+*.swp
+._*

@@ -1,0 +1,19 @@
+[Unit]
+Description=Xiaomi Sound Bridge: Loopback -> Bluetooth A2DP stream (%i speaker)
+After=bluealsa.service xsb-bt-reconnect.service systemd-modules-load.service
+Wants=bluealsa.service xsb-bt-reconnect.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/xsb/xsb.conf
+# %i = left | right
+ExecStart=/usr/local/sbin/xsb-bt-stream.sh %i
+Restart=always
+RestartSec=3
+# Real-time: the Bluetooth feed must never be starved. Below bluealsa (50).
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=40
+
+[Install]
+WantedBy=multi-user.target

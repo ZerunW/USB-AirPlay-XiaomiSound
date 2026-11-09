@@ -1,0 +1,394 @@
+#!/usr/bin/python3
+# Xiaomi Sound Bridge: keep the two speakers' volumes in sync.
+#
+# Both speakers use their own (AVRCP absolute) volume, so button presses and
+# voice commands on a speaker are reported to the Pi. Rules:
+#   - a speaker changes its volume      -> set the other speaker to the same
+#   - the computer changes the USB      -> set both speakers (mapped so the
+#     sound card's volume / mute           macOS slider percentage = speaker %)
+#   - AirPlay changes the volume        -> set both speakers ("airplay" mode,
+#                                          called by shairport-sync); the
+#                                          volume a sender announces on
+#                                          connect is ignored and the
+#                                          speakers' level is shown on the
+#                                          sender instead (needs shairport-sync
+#                                          built --with-dbus-interface)
+#   - speakers differ and there is no change on record (start-up, a speaker
+#     reconnects before any change)     -> the left speaker's volume wins
+#
+# Usage:
+#   xsb-volume-sync                 run the sync daemon (xsb-volume-sync.service)
+#   xsb-volume-sync airplay <vol>   shairport-sync run_this_when_volume_is_set
+#                                   hook; <vol> is AirPlay's -30..0 (-144 = mute)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+import re
+import subprocess
+import sys
+import threading
+import time
+
+CONF = "/etc/xsb/xsb.conf"
+QUIET_S = 2.0    # after we write a speaker, its events are echoes/stale for this long
+MAX_WRITES = 3   # per speaker per second: never flood the Bluetooth controller
+MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+MAX = 127  # AVRCP absolute volume range 0..127
+SAFE_DEFAULT = 64  # 50 %: used only when a speaker's real level is unknown
+SETTLE_S = 3.0     # wait for a newly connected speaker to report its real level
+
+# USB gadget "PCM Capture Volume" (0..100 = -100..0 dB) as set by the macOS
+# volume slider, measured: (gadget value, slider %). Interpolated in reverse
+# so "50 %" on the Mac means 50 % on the speakers.
+MAC_CURVE = [(0, 0), (32, 10), (50, 25), (65, 42), (71, 50), (87, 75), (100, 100)]
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+def read_conf():
+    conf = {}
+    try:
+        with open(CONF) as f:
+            for line in f:
+                m = re.match(r"\s*([A-Z_]+)=(.*)", line)
+                if m:
+                    conf[m.group(1)] = m.group(2).strip().strip('"')
+    except OSError:
+        pass
+    return conf
+
+
+def speaker_macs(conf):
+    """The configured {"left": MAC, "right": MAC}."""
+    return {s: conf.get(k, "") for s, k in (("left", "LEFT_MAC"), ("right", "RIGHT_MAC"))
+            if MAC_RE.match(conf.get(k, ""))}
+
+
+def pcm_path(mac):
+    return "/org/bluealsa/hci0/dev_%s/a2dpsrc/sink" % mac.upper().replace(":", "_")
+
+
+def cli(*args):
+    try:
+        r = subprocess.run(["bluealsa-cli", *args], capture_output=True, text=True, timeout=10)
+    except subprocess.TimeoutExpired:
+        return False, ""
+    return r.returncode == 0, r.stdout
+
+
+def get_level(path):
+    ok, out = cli("volume", path)
+    m = re.search(r"Volume:\s*(\d+)", out)
+    return int(m.group(1)) if ok and m else None
+
+
+def set_level(path, level):
+    cli("volume", path, str(level))
+
+
+def set_mute(path, on):
+    cli("mute", path, "on" if on else "off")
+
+
+def pct_to_level(pct):
+    return max(0, min(MAX, round(pct * MAX / 100)))
+
+
+def gadget_to_level(g):
+    for (g0, p0), (g1, p1) in zip(MAC_CURVE, MAC_CURVE[1:]):
+        if g <= g1:
+            pct = p0 + (p1 - p0) * (g - g0) / (g1 - g0)
+            return pct_to_level(pct)
+    return MAX
+
+
+class Sync:
+    def __init__(self, macs, native=True):
+        # macs: {"left": MAC, "right": MAC}. The first entry decides when
+        # there is no change on record. native=False would keep BlueALSA's
+        # software volume, which hides the speakers' real level from the Mi
+        # Home app; it is not used.
+        self.paths = {s: pcm_path(m) for s, m in macs.items()}
+        self.lead = next(iter(self.paths))
+        self.native = native
+        self.side_of = {p: s for s, p in self.paths.items()}
+        self.target = None  # last volume on record; None = no change yet
+        self.lock = threading.RLock()
+        self.last_write = {p: 0.0 for p in self.paths.values()}
+        self.writes = {p: [] for p in self.paths.values()}
+
+    def write(self, path, level):
+        """Rate-limited volume write; starts the path's quiet window."""
+        now = time.monotonic()
+        recent = [t for t in self.writes[path] if now - t < 1.0]
+        if len(recent) >= MAX_WRITES:
+            log("rate limit: skipping write to %s" % self.side_of[path])
+            return
+        self.writes[path] = recent + [now]
+        self.last_write[path] = now
+        set_level(path, level)
+
+    def reconcile(self):
+        """Periodic check (local D-Bus reads, no radio): bring both to target."""
+        with self.lock:
+            if self.target is None:
+                return
+            for s, p in self.paths.items():
+                if time.monotonic() - self.last_write[p] < QUIET_S:
+                    continue
+                cur = get_level(p)
+                if cur is not None and cur != self.target:
+                    log("reconcile: %s speaker %d -> %d" % (s, cur, self.target))
+                    self.write(p, self.target)
+
+    def adopt(self, side):
+        """A speaker (re)appeared: native volume at the recorded level."""
+        path = self.paths[side]
+        if get_level(path) is None:
+            return
+        with self.lock:
+            soft = self.native and "true" in cli("soft-volume", path)[1].lower()
+            if self.target is None:
+                # A new PCM briefly shows BlueALSA's initial volume before the
+                # speaker reports its real level (seen: 127, then 79 a moment
+                # later). Wait before letting the left speaker decide.
+                time.sleep(SETTLE_S)
+                if side == self.lead and soft:
+                    # In soft mode BlueALSA does not know the speaker's real
+                    # level, and switching to native volume pushes its own
+                    # value (127 = full volume) to the speaker. Never do that:
+                    # start from a safe level instead. (With --a2dp-volume the
+                    # PCM is native from the start and reports the real level.)
+                    set_level(path, SAFE_DEFAULT)
+                    cli("soft-volume", path, "off")
+                    log("left speaker was in soft-volume mode: starting at safe level %d" % SAFE_DEFAULT)
+                    time.sleep(0.5)
+                lead = get_level(self.paths[self.lead])
+                if lead is None:
+                    return  # wait for the lead speaker: it decides
+                self.target = lead
+                log("no volume change on record: %s speaker's %d wins" % (self.lead, lead))
+            if soft:
+                # Set the level while still in soft mode, so switching to native
+                # volume pushes the recorded level, not BlueALSA's default 127.
+                set_level(path, self.target)
+                cli("soft-volume", path, "off")
+                log("%s speaker: native volume at %d" % (side, self.target))
+            self.last_write[path] = time.monotonic()
+            self.write(path, self.target)
+
+    def speaker_changed(self, path, level):
+        side = self.side_of.get(path)
+        if side is None:
+            return
+        with self.lock:
+            if level == self.target:
+                return  # our own write echoing back, or already in sync
+            if time.monotonic() - self.last_write[path] < QUIET_S:
+                return  # stale report from before our write; reconcile() checks later
+            self.target = level
+            others = [s for s in self.paths if s != side]
+            if not others:
+                log("%s volume changed to %d" % (side, level))
+                return
+            log("%s speaker changed to %d: syncing %s" % (side, level, ", ".join(others)))
+            for s in others:
+                self.write(self.paths[s], level)
+
+    def set_all(self, level, source):
+        with self.lock:
+            self.target = level
+            log("%s volume -> %d on both speakers" % (source, level))
+            for p in self.paths.values():
+                self.write(p, level)
+
+    def mute_all(self, on, source):
+        log("%s %s both speakers" % (source, "muted" if on else "unmuted"))
+        for p in self.paths.values():
+            set_mute(p, on)
+
+
+def watch_bluealsa(sync):
+    """Speaker volume changes and speakers (re)connecting."""
+    while True:
+        p = subprocess.Popen(["stdbuf", "-oL", "bluealsa-cli", "monitor", "-p"],
+                             stdout=subprocess.PIPE, text=True)
+        for line in p.stdout:
+            f = line.split()
+            if len(f) >= 4 and f[0] == "PropertyChanged" and f[2] == "Volume":
+                v = int(f[3], 16)
+                sync.speaker_changed(f[1], (v >> 8) & 0x7F)
+            elif len(f) >= 2 and f[0] == "PCMAdded":
+                side = sync.side_of.get(f[1])
+                if side:
+                    time.sleep(1)
+                    sync.adopt(side)
+            elif f[:1] == ["ServiceRunning"]:
+                time.sleep(2)
+                for side in sync.paths:
+                    sync.adopt(side)
+        p.wait()
+        time.sleep(3)
+
+
+def gadget_value(name):
+    r = subprocess.run(["amixer", "-c", "UAC2Gadget", "cget", "iface=MIXER,name=" + name],
+                       capture_output=True, text=True)
+    m = re.search(r": values=(\S+)", r.stdout)
+    return m.group(1) if m else None
+
+
+def watch_usb(sync):
+    """The computer's volume / mute on the USB sound card."""
+    while True:
+        p = subprocess.Popen(["stdbuf", "-oL", "amixer", "-c", "UAC2Gadget", "events"],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        for line in p.stdout:
+            if not line.startswith("event value"):
+                continue
+            if "PCM Capture Volume" in line:
+                v = gadget_value("'PCM Capture Volume'")
+                if v is not None and v.isdigit():
+                    sync.set_all(gadget_to_level(int(v)), "computer")
+            elif "PCM Capture Switch" in line:
+                v = gadget_value("'PCM Capture Switch'")
+                if v in ("on", "off"):
+                    sync.mute_all(v == "off", "computer")
+        p.wait()
+        time.sleep(3)  # gadget card gone (re-enumeration): retry
+
+
+SESSION_FILE = "/run/xsb/airplay-session-start"  # written by xsb-source-switch.sh airplay
+AIRPLAY_IGNORE_S = 4.0  # the sender's volume right after connecting is not a user change
+
+
+def airplay_session_age():
+    try:
+        with open(SESSION_FILE) as f:
+            return time.time() - float(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def airplay_to_level(v):
+    return pct_to_level((max(-30.0, min(0.0, v)) + 30) / 30 * 100)
+
+
+def level_to_airplay(level):
+    return round(level / MAX * 30 - 30, 2)
+
+
+SS_DEST = ("org.gnome.ShairportSync", "/org/gnome/ShairportSync")
+
+
+def busctl(*args):
+    try:
+        r = subprocess.run(["busctl", "--system", *args], capture_output=True, text=True, timeout=5)
+    except subprocess.TimeoutExpired:
+        return None
+    return r.stdout.split() if r.returncode == 0 else None
+
+
+def airplay_status():
+    """(session active, sender's AirPlay volume) from shairport-sync's D-Bus
+    interface, or None (no D-Bus build / not running)."""
+    a = busctl("get-property", *SS_DEST, "org.gnome.ShairportSync", "Active")
+    v = busctl("get-property", *SS_DEST, "org.gnome.ShairportSync.RemoteControl", "AirplayVolume")
+    if not a or not v or len(a) < 2 or len(v) < 2:
+        return None
+    try:
+        return a[1] == "true", float(v[1])
+    except ValueError:
+        return None
+
+
+class AirplayPush:
+    """Show the speakers' real level on the AirPlay sender (iPhone slider).
+
+    Polled from the main loop. While a session is active and the sender's
+    volume disagrees with the speakers, tell the sender the speakers' level
+    (shairport-sync SetAirplayVolume, AirPlay 2 sends it back to the sender).
+    Waits until the connect-time volume has been ignored, and skips a round
+    whenever the sender's volume just moved (the user is dragging the slider).
+    """
+
+    def __init__(self, sync):
+        self.sync = sync
+        self.seen = None
+
+    def poll(self):
+        st = airplay_status()
+        if st is None or not st[0]:
+            self.seen = None  # no session: push again on the next one
+            return
+        age = airplay_session_age()
+        if age is None or age < AIRPLAY_IGNORE_S + 0.5:
+            return
+        vol = st[1]
+        moving = self.seen is not None and vol != self.seen
+        self.seen = vol
+        target = self.sync.target
+        if moving or target is None or vol <= -144:
+            return
+        if abs(airplay_to_level(vol) - target) <= 1:
+            return
+        db = level_to_airplay(target)
+        log("AirPlay sender shows %.2f dB, speakers are at %d: showing %.2f dB on the sender"
+            % (vol, target, db))
+        busctl("call", *SS_DEST, "org.gnome.ShairportSync.RemoteControl",
+               "SetAirplayVolume", "d", str(db))
+
+
+def airplay(vol):
+    """shairport-sync run_this_when_volume_is_set hook (runs as shairport-sync)."""
+    v = float(vol)
+    age = airplay_session_age()
+    if age is not None and 0 <= age < AIRPLAY_IGNORE_S:
+        # On connect the sender announces whatever volume it (or shairport-sync)
+        # last remembered, not a level the user just chose: keep the speakers
+        # as they are; xsb-volume-sync then shows their level on the sender.
+        subprocess.run(["logger", "-t", "xsb-airplay-volume",
+                        "ignored AirPlay volume %s %.1f s after connect" % (vol, age)])
+        return
+    conf = read_conf()
+    paths = [pcm_path(m) for m in speaker_macs(conf).values()]
+    if v <= -144:
+        subprocess.run(["logger", "-t", "xsb-airplay-volume", "AirPlay mute"])
+        for p in paths:
+            set_mute(p, True)
+        return
+    level = airplay_to_level(v)
+    cur = [get_level(p) for p in paths]
+    if all(c is not None and abs(c - level) <= 1 for c in cur):
+        return  # our own level echoed back by the sender (rounding)
+    subprocess.run(["logger", "-t", "xsb-airplay-volume", "AirPlay volume %s -> %d" % (vol, level)])
+    for p in paths:
+        set_mute(p, False)
+        set_level(p, level)
+
+
+def main():
+    if len(sys.argv) >= 3 and sys.argv[1] == "airplay":
+        airplay(sys.argv[2])
+        return
+    conf = read_conf()
+    macs = speaker_macs(conf)
+    if not macs:
+        log("LEFT_MAC / RIGHT_MAC not set: nothing to sync")
+        while True:
+            time.sleep(3600)
+    sync = Sync(macs)
+    for side in sync.paths:
+        sync.adopt(side)
+    threading.Thread(target=watch_usb, args=(sync,), daemon=True).start()
+    threading.Thread(target=watch_bluealsa, args=(sync,), daemon=True).start()
+    push = AirplayPush(sync)
+    while True:
+        time.sleep(QUIET_S + 1)
+        sync.reconcile()
+        push.poll()
+
+
+if __name__ == "__main__":
+    main()

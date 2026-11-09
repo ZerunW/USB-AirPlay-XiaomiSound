@@ -1,0 +1,20 @@
+# Xiaomi Sound Bridge: let idle Bluetooth links enter sniff mode.
+# The Zero 2 W shares one 2.4 GHz radio between Wi-Fi and Bluetooth. With the
+# kernel's default idle_timeout=0 the speaker links never leave active
+# mode, and just being connected cut Wi-Fi downlink to 2-7 Mbit/s (the router
+# fell back to a 2 Mbit/s rate). With idle links in sniff mode it measured
+# 16-19 Mbit/s, about the same as with Bluetooth off. Links leave sniff mode
+# by themselves as soon as audio or control traffic flows.
+[Unit]
+Description=Xiaomi Sound Bridge: Bluetooth idle sniff mode (frees the shared radio for Wi-Fi)
+After=bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/xsb/xsb.conf
+ExecStart=/bin/sh -c 'for i in $(seq 30); do [ -w /sys/kernel/debug/bluetooth/hci0/idle_timeout ] && break; sleep 1; done; echo "${BT_IDLE_SNIFF_MS:-2000}" > /sys/kernel/debug/bluetooth/hci0/idle_timeout'
+
+[Install]
+WantedBy=multi-user.target
