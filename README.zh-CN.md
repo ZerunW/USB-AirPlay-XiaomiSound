@@ -246,8 +246,19 @@ sudo systemctl restart xsb-bt-stream@left xsb-bt-stream@right
 | `AUDIO_LATENCY_MS` | `50` | USB 转发缓冲 |
 | `BT_IDLE_STOP_S` | `15` | 音源停止多久后停掉蓝牙推流 |
 | `BT_IDLE_SNIFF_MS` | `2000` | 链路空闲多久后进入 sniff 省电 |
+| `WIFI` | `on` | 设为 `off` 表示不使用 Wi-Fi（见下） |
 
 修改后重启推流服务；修改 `BLUEALSA_OPTS` 后还要重启 `bluealsa`。
+
+### 不使用 Wi-Fi
+
+Zero 2 W 的 Wi-Fi 和蓝牙共用一颗芯片。如果你不需要 Wi-Fi（AirPlay 接收端要用它），可以关掉：
+
+1. 在 `/etc/xsb/xsb.conf` 里设 `WIFI=off`。这样 gadget 始终带上 USB 网络，Wi-Fi 看门狗不再工作，开机时推流也不再等待 Wi-Fi。
+2. 执行 `sudo systemctl restart xsb-gadget xsb-rescue xsb-usb-forward`。电脑会重新识别声卡，产品号变为 `USB_RESCUE_PRODUCT_ID`。
+3. 确认 `ssh <用户名>@<主机名>.local` 能通过 USB 线登录后，再执行 `sudo nmcli radio wifi off`。NetworkManager 会在重启后保持关闭。
+
+要恢复：设回 `WIFI=on`，执行 `sudo nmcli radio wifi on`，再重启上面的服务。
 
 ## 致谢与许可证
 

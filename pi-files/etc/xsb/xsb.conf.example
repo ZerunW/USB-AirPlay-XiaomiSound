@@ -73,6 +73,13 @@ USB_SRATE=48000
 USB_SYNC=async
 USB_PRODUCT_ID=0x0104
 
+# Set to "off" if you switch Wi-Fi off ("nmcli radio wifi off"). The Zero 2 W
+# shares one 2.4 GHz radio between Wi-Fi and Bluetooth, and a busy Wi-Fi shows
+# up as crackle on the speakers. With WIFI=off the USB network link is always
+# part of the gadget (ssh over the cable, see README), the Wi-Fi watchdog does
+# nothing, and the streams do not wait for Wi-Fi at boot.
+WIFI=on
+
 # Wi-Fi watchdog (xsb-rescue.service): re-activate the Wi-Fi connection after
 # it has been down this many seconds (then every 60 -> 120 -> 300 s).
 RETRY_AFTER_S=60

@@ -246,8 +246,19 @@ sudo systemctl restart xsb-bt-stream@left xsb-bt-stream@right
 | `AUDIO_LATENCY_MS` | `50` | USB forwarding buffer |
 | `BT_IDLE_STOP_S` | `15` | stop the Bluetooth streams this long after the source stops |
 | `BT_IDLE_SNIFF_MS` | `2000` | idle time before a link enters sniff mode |
+| `WIFI` | `on` | set `off` to run without Wi-Fi (see below) |
 
 Restart the streams after a change; restart `bluealsa` after changing `BLUEALSA_OPTS`.
+
+### Running without Wi-Fi
+
+Wi-Fi and Bluetooth share one radio on the Zero 2 W. If you do not need Wi-Fi (the AirPlay receiver needs it), switch it off:
+
+1. Set `WIFI=off` in `/etc/xsb/xsb.conf`. The gadget then always includes the USB network link, the Wi-Fi watchdog does nothing, and the streams do not wait for Wi-Fi at boot.
+2. `sudo systemctl restart xsb-gadget xsb-rescue xsb-usb-forward`. The computer sees the sound card again, with the product ID `USB_RESCUE_PRODUCT_ID`.
+3. Check that `ssh <user>@<hostname>.local` works over the USB cable, then `sudo nmcli radio wifi off`. NetworkManager keeps this across reboots.
+
+To undo it: set `WIFI=on`, `sudo nmcli radio wifi on`, and restart the same services.
 
 ## Credits and license
 

@@ -30,7 +30,7 @@ fi
 # a second once the streams were stopped. Wait up to WIFI_WAIT_S (default 90)
 # in the first 5 minutes after boot, then stream regardless (USB-only setups
 # without Wi-Fi must still play).
-if [ "$(cut -d. -f1 /proc/uptime)" -lt 300 ]; then
+if [ "${WIFI:-on}" != off ] && [ "$(cut -d. -f1 /proc/uptime)" -lt 300 ]; then
     for ((w = 0; w < ${WIFI_WAIT_S:-90}; w += 2)); do
         nmcli -t -f DEVICE,STATE device 2>/dev/null | grep -qx 'wlan0:connected' && break
         [ "$w" = 0 ] && echo "waiting for Wi-Fi before starting the $SIDE stream"

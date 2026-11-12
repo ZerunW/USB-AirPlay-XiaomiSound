@@ -20,6 +20,14 @@
 set -u
 
 [ -r /etc/xsb/xsb.conf ] && . /etc/xsb/xsb.conf
+
+# WIFI=off: Wi-Fi is switched off on purpose (see xsb.conf), so there is
+# nothing to retry, and the USB network link is already part of the gadget.
+if [ "${WIFI:-on}" = off ]; then
+    echo "WIFI=off: not watching Wi-Fi"
+    exec sleep infinity
+fi
+
 RETRY_AFTER="${RETRY_AFTER_S:-60}"
 GRACE="${RESCUE_AFTER_S:-180}"
 BACKOFF=(60 120 300)

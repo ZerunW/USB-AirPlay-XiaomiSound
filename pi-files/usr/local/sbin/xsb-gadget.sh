@@ -24,6 +24,9 @@ SYNC="${USB_SYNC:-async}"
 PID="${USB_PRODUCT_ID:-0x0104}"
 RESCUE="${XSB_RESCUE:-0}"
 RESCUE_PID="${USB_RESCUE_PRODUCT_ID:-0x0105}"
+# WIFI=off (xsb.conf): Wi-Fi is switched off on purpose, so the USB network
+# link is the only way in and is always part of the gadget.
+[ "${WIFI:-on}" = off ] && RESCUE=1
 [ "$RESCUE" = 1 ] && PID="$RESCUE_PID"
 
 # Stable locally administered MAC derived from the board serial, so the host
