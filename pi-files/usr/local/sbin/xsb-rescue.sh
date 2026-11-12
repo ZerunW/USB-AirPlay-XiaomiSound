@@ -59,6 +59,9 @@ while :; do
         echo "wlan0 down for ${down}s: switching USB gadget to audio + network rescue"
         XSB_RESCUE=1 /usr/local/sbin/xsb-gadget.sh restart
         echo "rescue gadget up (exit $?); ssh over USB to $(hostname).local"
+        # The rebuilt gadget is a new sound card. The volume sync listens on
+        # the old one and would never see the computer's volume again.
+        systemctl restart xsb-volume-sync 2>/dev/null || true
         rescued=1
     fi
 
